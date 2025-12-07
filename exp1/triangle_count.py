@@ -1,17 +1,3 @@
-"""
-实验一：有效三角形的个数
-
-问题描述：
-给定一个包含非负整数的数组nums，返回其中可以组成三角形三条边的三元组个数。
-
-三角形的判定条件：
-对于三边 a, b, c (满足 a ≤ b ≤ c)，若能构成三角形，则必须满足：a + b > c
-
-提示：
-1 <= nums.length <= 1000
-0 <= nums[i] <= 1000
-"""
-
 import time
 import random
 
@@ -72,7 +58,7 @@ def triangle_number_method1(nums):
 
 def triangle_number_method2(nums):
     """
-    方法二：暴力法（不推荐）
+    方法二：暴力法
     
     时间复杂度：O(n^3)
     空间复杂度：O(1)
@@ -110,7 +96,7 @@ def triangle_number_method2(nums):
 
 def print_all_triangles(nums):
     """
-    辅助函数：打印所有有效的三角形组合
+    打印所有有效的三角形组合
     
     参数：
         nums: 包含非负整数的数组
