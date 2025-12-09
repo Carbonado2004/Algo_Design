@@ -1,18 +1,3 @@
-# 这是一个基于 PyTorch 手写 ResNet 的 CIFAR-10 图像分类实验代码
-# 目标：在保持"初学者友好"风格的同时，循序渐进地引入更强的技巧，观察准确率如何提升
-#
-# ===== 实验设计说明 =====
-# 本文件包含三个递进实验，逐步引入更先进的技术：
-# 1. 实验1：浅层ResNet（9-10层）+ 简单数据增强 + AdamW + 基础正则化
-# 2. 实验2：ResNet-18 + 简单数据增强 + AdamW + 强正则化 + 早停机制
-# 3. 实验3：ResNet-18 + RandAugment + CutMix + SAM + 余弦退火（最终实验，整合SOTA方法）
-#
-# ===== 关键设计决策 =====
-# - 统一使用AdamW优化器：经过充分验证，在CIFAR-10上表现稳定且优秀
-# - 使用CIFAR-10真实统计值进行归一化：提高训练稳定性
-# - 实验3整合SOTA方法：RandAugment（自动数据增强）+ CutMix + Mixup（混合增强组合）+ Label Smoothing + SAM优化器
-# - 所有实验包含2个显式MaxPool层（满足实验要求）
-# - 使用早停机制防止过拟合（实验1和2）
 
 # --- 导入必要的库 ---
 import torch
@@ -59,9 +44,8 @@ plt.rcParams['axes.unicode_minus'] = False
 # --- 1. 超参数配置 ---
 BATCH_SIZE = 128      # 批次大小，较大的batch size有助于稳定训练
 
-# --- SAM优化器实现 (Sharpness-Aware Minimization) ---
+# SAM优化器实现 (Sharpness-Aware Minimization)
 # 论文：Sharpness-Aware Minimization for Efficiently Improving Generalization (ICLR 2021)
-# SAM通过同时最小化损失和锐度来提升泛化能力，在CIFAR-10上通常能带来1-2%的提升
 class SAM(torch.optim.Optimizer):
     """
     SAM优化器：Sharpness-Aware Minimization
@@ -146,8 +130,7 @@ class SAM(torch.optim.Optimizer):
     def load_state_dict(self, state_dict):
         super().load_state_dict(state_dict)
         self.base_optimizer.param_groups = self.param_groups
-EPOCHS = 50           # 训练轮次，50轮足够让模型充分收敛
-# 注意：学习率在实验配置中单独设置，因为不同实验可能使用不同的学习率
+EPOCHS = 50
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # --- 2. 数据预处理与增强 ---
@@ -165,15 +148,14 @@ transform_simple = transforms.Compose([
     transforms.Normalize(cifar_mean, cifar_std)            # 按训练集统计值做零均值/单位方差，稳定优化
 ])
 
-# 中等强度数据增强：用于实验1和2，包含RandomCrop、RandomFlip、ColorJitter、RandomErasing
-# 相比transform_simple，这个增强策略能有效防止过拟合
+# 中等强度数据增强：包含RandomCrop、RandomFlip、ColorJitter、RandomErasing
 transform_medium = transforms.Compose([
     transforms.RandomCrop(32, padding=4),                  # 先四周填充4像素再裁回32x32，引入位移鲁棒性
     transforms.RandomHorizontalFlip(p=0.5),                # 左右翻转，平衡方向偏好
-    transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.15, hue=0.1),  # 增强色彩扰动强度，防光照过拟合
+    transforms.ColorJitter(brightness=0.15, contrast=0.15, saturation=0.15, hue=0.1),
     transforms.ToTensor(),                                 # 转 tensor
     transforms.Normalize(cifar_mean, cifar_std),           # 标准化
-    transforms.RandomErasing(p=0.3, scale=(0.02, 0.2), ratio=(0.3, 3.3), value=0)   # 增加随机遮挡概率和范围，迫使模型看整体
+    transforms.RandomErasing(p=0.3, scale=(0.02, 0.2), ratio=(0.3, 3.3), value=0)
 ])
 
 # 增强版预处理：在基线之上加入裁剪/翻转/色彩抖动/随机擦除，提高数据多样性以防过拟合
@@ -301,8 +283,7 @@ class MiniResNet(nn.Module):
         self.conv1 = nn.Conv2d(3, base_channels, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(base_channels)           # 首层 BN，稳住输入分布
         self.relu = nn.ReLU(inplace=True)                  # 首层激活
-        # 第一个MaxPool层（满足实验要求：至少2个池化层用于下采样）
-        # 标准ResNet在CIFAR-10上使用kernel_size=3, stride=2, padding=1，将32x32下采样到16x16
+        # 第一个MaxPool层：将32x32下采样到16x16
         self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)  # 下采样：32x32 -> 16x16
 
         # 四个 stage，每个 stage 降采样一次（stride=2），通道数翻倍
@@ -310,12 +291,11 @@ class MiniResNet(nn.Module):
         self.layer2 = self._make_layer(base_channels * 2, block_layers[1], stride=2)
         self.layer3 = self._make_layer(base_channels * 4, block_layers[2], stride=2)
         self.layer4 = self._make_layer(base_channels * 8, block_layers[3], stride=2)
-        # 第二个MaxPool层（满足实验要求：至少2个池化层）
-        # 在layer4之后添加MaxPool，进一步下采样（虽然后面有AdaptiveAvgPool，但这是显式的池化层）
+        # 第二个MaxPool层：进一步下采样
         self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)  # 下采样：2x2 -> 1x1
 
         self.global_pool = nn.AdaptiveAvgPool2d(1)  # 全局平均池化，将任意尺寸压缩到1x1
-        # 在全连接层前添加Dropout，进一步提升正则化效果
+        # 在全连接层前添加Dropout
         self.fc_dropout = nn.Dropout(fc_dropout) if fc_dropout > 0 else nn.Identity()
         self.fc = nn.Linear(base_channels * 8 * BasicBlock.expansion, num_classes)
         
@@ -348,7 +328,7 @@ class MiniResNet(nn.Module):
         out = self.conv1(x)  # [B, 3, 32, 32] -> [B, C, 32, 32]
         out = self.bn1(out)
         out = self.relu(out)
-        out = self.maxpool(out)  # [B, C, 32, 32] -> [B, C, 16, 16]（第一个MaxPool，满足实验要求）
+        out = self.maxpool(out)  # [B, C, 32, 32] -> [B, C, 16, 16]
         
         # 四个stage，每个stage通过stride=2的卷积降采样
         out = self.layer1(out)  # [B, C, 16, 16]（不降采样）
@@ -356,7 +336,7 @@ class MiniResNet(nn.Module):
         out = self.layer3(out)  # [B, 4C, 4, 4]（stride=2降采样）
         out = self.layer4(out)  # [B, 8C, 2, 2]（stride=2降采样）
         
-        # 第二个MaxPool：进一步下采样（满足实验要求：至少2个池化层）
+        # 第二个MaxPool：进一步下采样
         out = self.pool2(out)  # [B, 8C, 2, 2] -> [B, 8C, 1, 1]
         
         # 全局平均池化，再接全连接做分类
@@ -621,8 +601,7 @@ def train_model(model, train_loader, optimizer, criterion, device,
         
         # 准确率计算：当使用CutMix/Mixup时，图像是混合的，没有单一的"正确"标签
         # 因此我们只在没有使用混合增强的样本上计算准确率，或者使用原始标签y_a作为近似
-        # 注意：这会导致训练准确率偏低，因为混合图像的预测与单一标签不完全匹配
-        # 这是正常的，因为混合增强使训练任务变得更难，但提高了泛化能力
+        # 使用混合增强时，训练准确率会偏低，因为混合图像没有单一"正确"标签
         if (use_cutmix_this_batch or use_mixup_this_batch) and y_b is not None:
             # 对于混合样本，使用原始标签y_a计算准确率（虽然不完全准确，但作为参考）
             # 实际训练准确率会偏低，这是使用混合增强的正常现象
@@ -1107,49 +1086,37 @@ if __name__ == '__main__':
     test_loader = torch.utils.data.DataLoader(
         test_set, batch_size=BATCH_SIZE, shuffle=False, num_workers=2)
 
-    print("--- 数据增强说明 ---")
-    print("  实验1-2: 使用中等强度数据增强（RandomCrop + RandomFlip + ColorJitter + RandomErasing）")
-    print("  实验3: 使用RandAugment（自动数据增强）+ CutMix + Mixup（混合增强组合）+ Label Smoothing + SAM优化器")
 
-    # 设计三个递进实验，逐步引入更先进的技巧
-    # 注意：
-    # - 所有实验都包含2个显式MaxPool层（满足实验要求）
-    # - 所有实验统一使用AdamW优化器（经过充分验证，性能稳定且优秀）
-    # - 实验3整合了SOTA方法：RandAugment + CutMix + Mixup + Label Smoothing，作为最终实验
     experiments = [
         {
             "name": "实验1: 手写ResNet(浅层) + 中等数据增强 + AdamW",
-            # 浅层ResNet说明：每个stage有1个残差块，共4个stage，加上conv1和fc，约9-10层
-            # 相比ResNet-18（18层），这是一个更轻量的模型，适合作为baseline
-            # 改进：使用中等强度数据增强（RandomCrop + RandomFlip + ColorJitter + RandomErasing）防止过拟合
             "model_args": {"depth": "浅层", "base_channels": 32, "dropout": 0.2, 
-                          "fc_dropout": 0.15},  # 增强Dropout：从0.15/0.1提升到0.2/0.15，进一步防止过拟合
-            "train_loader": loader_medium,                  # 使用中等强度数据增强，而非简单的transform_simple
-        "optimizer": "AdamW",                                # 统一使用AdamW优化器，性能稳定且优秀
+                          "fc_dropout": 0.15},
+            "train_loader": loader_medium,
+        "optimizer": "AdamW",
         "lr": 0.001,                                        # AdamW通常使用较小的学习率
-        "weight_decay": 1.5e-3,                             # 增强权重衰减：从1e-3提升到1.5e-3，进一步防止过拟合
-        "scheduler": {"type": "StepLR", "step_size": 12, "gamma": 0.5},  # 更早降低学习率：step_size从15减到12
-            "label_smoothing": 0.15,                        # 增强标签平滑：从0.1提升到0.15，进一步防止过拟合
-            "grad_clip": 1.0,                              # 添加梯度裁剪，防止梯度爆炸
-            "epochs": 80,                                  # 增加到80个epoch，给模型更多时间收敛（从训练曲线看仍有提升空间）
-            "early_stopping": True,                         # 启用早停机制
-            "early_stopping_patience": 7                    # 更早停止：从10减到7，防止过拟合
+        "weight_decay": 1.5e-3,
+        "scheduler": {"type": "StepLR", "step_size": 12, "gamma": 0.5},
+            "label_smoothing": 0.15,
+            "grad_clip": 1.0,
+            "epochs": 80,
+            "early_stopping": True,
+            "early_stopping_patience": 7
         },
         {
             "name": "实验2: 手写ResNet(18层) + 中等数据增强 + AdamW + LR调度",
-            # 改进：使用中等强度数据增强（RandomCrop + RandomFlip + ColorJitter + RandomErasing）防止过拟合
             "model_args": {"depth": "18层", "base_channels": 32, "dropout": 0.3,
-                          "fc_dropout": 0.25},  # 进一步增强Dropout：从0.25/0.2提升到0.3/0.25，深度模型需要更强正则化
-            "train_loader": loader_medium,                  # 使用中等强度数据增强，而非简单的transform_simple
-        "optimizer": "AdamW",                                # AdamW 自带权重衰减，收敛快
+                          "fc_dropout": 0.25},
+            "train_loader": loader_medium,
+        "optimizer": "AdamW",
             "lr": 0.001,
-            "weight_decay": 1.5e-3,                         # 增强权重衰减：从1e-3提升到1.5e-3，进一步防止过拟合
-        "scheduler": {"type": "ReduceLROnPlateau", "mode": "max", "patience": 2, "factor": 0.5},  # 更激进地降低LR：patience从3减到2
-        "label_smoothing": 0.15,                            # 增强标签平滑：从0.1提升到0.15，进一步防止过拟合
-        "grad_clip": 1.0,                                   # 梯度裁剪，防梯度爆炸
-        "epochs": 80,                                       # 增加到80个epoch，给模型更多时间收敛（从训练曲线看仍有提升空间）
-        "early_stopping": True,                             # 启用早停机制，防止继续过拟合
-        "early_stopping_patience": 6                         # 更早停止：从8减到6，防止过拟合
+            "weight_decay": 1.5e-3,
+        "scheduler": {"type": "ReduceLROnPlateau", "mode": "max", "patience": 2, "factor": 0.5},
+        "label_smoothing": 0.15,
+        "grad_clip": 1.0,
+        "epochs": 80,
+        "early_stopping": True,
+        "early_stopping_patience": 6
         },
         {
             "name": "实验3: 手写ResNet(18层) + RandAugment + CutMix + Mixup + LabelSmoothing + SAM + 余弦退火",
@@ -1160,37 +1127,23 @@ if __name__ == '__main__':
             # 改进：启用Label Smoothing，即使有CutMix/Mixup，Label Smoothing也能提供额外的正则化
             # 改进：增加模型容量（base_channels: 32 -> 64），提高模型表达能力
             # 
-            # ===== 重要说明：为什么Test准确率高于Train准确率？ =====
-            # 这是使用CutMix/Mixup混合增强时的正常现象，原因如下：
-            # 1. 训练时：使用CutMix/Mixup混合图像（如70%图片A + 30%图片B），模型预测混合图像
-            #    但训练准确率计算时使用原始标签y_a，导致准确率偏低（因为混合图像没有单一"正确"标签）
-            # 2. 测试时：使用原始未混合的图像，模型在真实数据上表现更好
-            # 3. 这实际上说明模型泛化能力好，混合增强使训练任务变难，但提高了泛化能力
-            # 
-            # ===== 为什么没有达到96%？可能的原因 =====
-            # 1. 模型容量：虽然已提升到base_channels=64，但可能还需要更多层或更大容量
-            # 2. 训练轮次：50个epoch可能不够，SOTA方法通常需要100-200个epoch
-            # 3. 学习率策略：可能需要warmup或更精细的学习率调度
-            # 4. 数据增强强度：可能需要更强的RandAugment配置
-            # 5. 其他技巧：EMA（指数移动平均）、更好的初始化、知识蒸馏等
-            # 统一使用AdamW优化器：经过充分验证，在CIFAR-10上表现稳定且优秀
             "model_args": {"depth": "18层", "base_channels": 64, "dropout": 0.1,
-                          "fc_dropout": 0.1},  # 增加模型容量：base_channels从32提升到64（标准ResNet-18使用64），提高模型表达能力
-            "train_loader": loader_randaugment,              # 使用RandAugment数据增强
-            "optimizer": "SAM",                              # 使用SAM优化器（Sharpness-Aware Minimization）
-            "lr": 0.001,                                    # SAM通常使用与AdamW相似的学习率
+                          "fc_dropout": 0.1},
+            "train_loader": loader_randaugment,
+            "optimizer": "SAM",
+            "lr": 0.001,
             "weight_decay": 5e-4,
-            "sam_rho": 0.05,                                 # SAM的锐度参数，控制锐度搜索范围（通常0.05-0.1）
-        "scheduler": {"type": "CosineAnnealingLR", "T_max": 100, "eta_min": 1e-5},  # 余弦退火（SOTA方法的关键），T_max=100对应100个epoch
-        "epochs": 100,                                 # 实验3使用100个epoch，以获得更好的性能（SOTA方法通常需要更长训练）
-        "label_smoothing": 0.1,                             # 启用Label Smoothing：即使有CutMix/Mixup，也能提供额外正则化
+            "sam_rho": 0.05,
+        "scheduler": {"type": "CosineAnnealingLR", "T_max": 100, "eta_min": 1e-5},
+        "epochs": 100,
+        "label_smoothing": 0.1,
         "grad_clip": None,
-        "use_cutmix": True,                                 # 启用CutMix数据增强
-        "cutmix_alpha": 1.0,                                 # CutMix的Beta分布参数
-        "use_mixup": True,                                  # 启用Mixup数据增强
-        "mixup_alpha": 0.8,                                 # Mixup的Beta分布参数（0.8比1.0稍弱，与CutMix互补）
-        "early_stopping": True,                              # 启用早停机制，防止过拟合
-        "early_stopping_patience": 12                         # 余弦退火可能需要更多时间，设置patience=12
+        "use_cutmix": True,
+        "cutmix_alpha": 1.0,
+        "use_mixup": True,
+        "mixup_alpha": 0.8,
+        "early_stopping": True,
+        "early_stopping_patience": 12
         }
     ]
 
@@ -1209,27 +1162,19 @@ if __name__ == '__main__':
         use_sam = (optimizer_type == "SAM")
         
         if use_sam:
-            # SAM优化器：需要先创建基础优化器（AdamW），然后用SAM包装
             base_optimizer = optim.AdamW(model.parameters(), lr=exp["lr"],
                                         weight_decay=exp["weight_decay"])
-            # SAM需要传入params（与base_optimizer的params一致）和base_optimizer
             optimizer = SAM(model.parameters(), base_optimizer, 
                           rho=exp.get("sam_rho", 0.05))
             print(f"--- 使用SAM优化器 (rho={exp.get('sam_rho', 0.05)}) ---")
-            print("  SAM通过同时最小化损失和锐度来提升泛化能力，是CIFAR-10上的杀手锏技术")
         else:
-            # 标准AdamW优化器：经过充分验证，在CIFAR-10上表现稳定且优秀
-            # AdamW结合了Adam的自适应学习率和权重衰减解耦，在深度学习中表现优异
             optimizer = optim.AdamW(model.parameters(), lr=exp["lr"],
                                     weight_decay=exp["weight_decay"])
 
         scheduler = create_scheduler(optimizer, exp.get("scheduler"))
         scheduler_type = exp.get("scheduler", {}).get("type") if exp.get("scheduler") else None
         
-        # 每个实验可以单独设置训练轮次，如果没有设置则使用全局EPOCHS
         num_epochs = exp.get("epochs", EPOCHS)
-        if num_epochs != EPOCHS:
-            print(f"--- 本实验使用 {num_epochs} 个epoch（全局设置为 {EPOCHS}）---")
         
         # 如果使用CosineAnnealingLR，需要更新T_max为实际使用的epoch数
         if scheduler is not None and scheduler_type == "CosineAnnealingLR":
@@ -1242,7 +1187,6 @@ if __name__ == '__main__':
         best_acc = 0.0
         best_epoch = 0
 
-        # 早停机制：如果启用，监控测试准确率，连续不提升则提前停止
         early_stopping = exp.get("early_stopping", False)
         early_stopping_patience = exp.get("early_stopping_patience", 10)
         patience_counter = 0  # 连续不提升的epoch数
@@ -1291,7 +1235,6 @@ if __name__ == '__main__':
                   f"Test Loss: {test_loss:.4f} | Test Acc: {test_acc:.2f}% | "
                   f"LR: {current_lr:.6f} | Best: {best_acc:.2f}% (Epoch {best_epoch})", end="")
             
-            # 早停检查：如果测试准确率连续不提升，且训练准确率已经很高（可能过拟合），则提前停止
             if early_stopping:
                 # 检查过拟合指标：训练准确率很高但测试准确率停滞
                 overfitting_risk = train_acc > 95.0 and (train_acc - test_acc) > 10.0
@@ -1364,10 +1307,8 @@ if __name__ == '__main__':
         print(f"实验3整合了论文中报导的SOTA方法组合：")
         print(f"  - RandAugment: 自动数据增强，从14种增强操作中随机选择，提高数据多样性")
         print(f"  - CutMix: 混合两张图片的区域和标签，增强模型泛化能力，防止过拟合")
-        print(f"  - SAM优化器: Sharpness-Aware Minimization (ICLR 2021)，通过同时最小化损失和锐度来提升泛化能力")
-        print(f"    这是CIFAR-10上ResNet-18刷榜的最强单体技术，通常能带来1-2%的提升")
+        print(f"  - SAM优化器: Sharpness-Aware Minimization (ICLR 2021)")
         print(f"  - Cosine Annealing LR: 余弦退火学习率调度，帮助模型精细调优")
-        print(f"  预期准确率: 95.5-96.5% (使用SAM优化器，论文报导可达95.5-96.2%)")
     
     # 绘制消融实验对比图
     print("\n--- 绘制消融实验对比图 ---")
@@ -1375,30 +1316,25 @@ if __name__ == '__main__':
     plot_ablation_study(final_results, title="消融实验对比 - 逐步引入先进技术",
                        save_path="plots/ablation_study.png")
     
-    # ===== 批次大小对比实验 =====
-    # 选择实验1（浅层ResNet）作为基础，因为它运行较快
+    # 批次大小对比实验
     print("\n" + "=" * 70)
     print("--- 批次大小对比实验 ---")
     print("=" * 70)
-    print("基于实验1（浅层ResNet）进行批次大小对比，测试不同批次大小对训练效果的影响")
     
     batch_sizes = [64, 128, 256]  # 测试三种批次大小
     batch_size_results = {}
     
-    # 使用实验1的配置作为基础
     base_exp = experiments[0]
     
     for batch_size in batch_sizes:
         print(f"\n--- 批次大小: {batch_size} ---")
         
         # 创建对应批次大小的数据加载器
-        # 注意：在Windows上，num_workers=0可以避免多进程问题
         loader_batch = torch.utils.data.DataLoader(
             train_set_simple, batch_size=batch_size, shuffle=True, num_workers=0)
         test_loader_batch = torch.utils.data.DataLoader(
             test_set, batch_size=batch_size, shuffle=False, num_workers=0)
         
-        # 创建模型（使用实验1的配置）
         model = build_resnet(**base_exp["model_args"]).to(device)
         criterion = nn.CrossEntropyLoss()
         optimizer = optim.AdamW(model.parameters(), lr=base_exp["lr"],
@@ -1410,8 +1346,7 @@ if __name__ == '__main__':
         best_acc = 0.0
         best_epoch = 0
         
-        # 使用较少的epoch进行快速对比（批次大小实验不需要完整训练）
-        quick_epochs = min(30, EPOCHS)  # 最多30个epoch
+        quick_epochs = min(30, EPOCHS)
         
         start_time = time.time()
         for epoch in range(quick_epochs):

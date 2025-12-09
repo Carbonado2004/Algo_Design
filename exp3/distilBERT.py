@@ -1,6 +1,3 @@
-# 这是一个完整的实验脚本，用于 "实验三：前沿人工智能算法研究与实现 - 方向三 (NLP)"
-# 目标: 演示如何使用轻量级模型 (DistilBERT) + 高效微调 (LoRA) + 可解释性 (SHAP)
-
 # --- 1. 导入所有需要的库 ---
 print("--- 1. 开始导入依赖库 ---")
 import torch
@@ -81,9 +78,7 @@ print("所有库导入成功！\n")
 # --- 2. 定义全局配置和辅助函数 ---
 # 把一些固定参数放在这里，方便修改，这是一个好习惯
 
-# 记录一下我的思考：
-# 选择 'distilbert-base-uncased' 作为轻量级模型，因为它比 BERT-base 小很多，训练快。
-# 'uncased' 意味着它不区分大小写。
+# 使用 'distilbert-base-uncased' 作为轻量级模型，'uncased' 表示不区分大小写
 
 # 模型路径配置：支持离线模式
 # 优先使用本地模型，如果不存在则使用在线模型
@@ -100,27 +95,22 @@ else:
     print(f"警告: 未找到本地模型，将尝试在线下载: {MODEL_CHECKPOINT}")
     print(f"   提示：如果网络有问题，请先下载模型到 {LOCAL_MODEL_PATH}")
     print(f"   详细说明请查看 OFFLINE_SETUP.md")
-# 数据集就用实验指导书里提到的 IMDb
-# 注意：只支持从本地 parquet 文件加载，不支持在线下载
+# 使用IMDb数据集，仅支持从本地parquet文件加载
 LOCAL_DATASET_CACHE = "./datasets"  # 本地数据集缓存目录
 
-# 训练配置优化
-NUM_EPOCHS = 5  # 增加到5个epoch，让模型充分训练
-BATCH_SIZE = 16  # 16 比较中等，不会太占显存
+NUM_EPOCHS = 5
+BATCH_SIZE = 16
 
-# 不同实验使用不同的学习率
-LEARNING_RATE_BASELINE = 2e-5  # Baseline 全量微调使用较小的学习率
-LEARNING_RATE_LORA = 3e-5  # LoRA 使用适中的学习率（降低以提升稳定性，配合更大的r值）
-LEARNING_RATE_DAPT_MLM = 5e-5  # DAPT 阶段1（MLM预训练）使用稍大的学习率
-LEARNING_RATE_DAPT_FINETUNE = 3e-5  # DAPT 阶段2（LoRA微调）使用标准学习率
+LEARNING_RATE_BASELINE = 2e-5
+LEARNING_RATE_LORA = 3e-5
+LEARNING_RATE_DAPT_MLM = 5e-5
+LEARNING_RATE_DAPT_FINETUNE = 3e-5
 
-# 训练数据量配置（可调整以提升效果）
-TRAIN_SAMPLES = 10000  # 增加到10000条训练样本以提升效果（可根据需要调整：5000, 10000, 20000等）
-EVAL_SAMPLES = 2000  # 增加评估样本量以获得更可靠的评估结果
+TRAIN_SAMPLES = 10000
+EVAL_SAMPLES = 2000
 
 
-# 实验要求：评估性能（如准确率、F1 分数）
-# 我们需要定义一个评估函数，传给 Trainer
+# 评估函数：计算准确率和F1分数
 def compute_metrics(eval_pred):
     """
     计算评估指标的函数
@@ -191,7 +181,6 @@ def print_trainable_parameters(model):
         all_param += param.numel()
         if param.requires_grad:
             trainable_params += param.numel()
-    # 打印出来，这个数字在写实验报告时非常有用！
     print(
         f"  可训练参数 (trainable params): {trainable_params}"
         f" || 总参数 (all params): {all_param}"
@@ -342,7 +331,7 @@ def plot_comparison(results_dict, save_path="./visualizations"):
 
 
 # --- 数据增强函数定义 ---
-# 用于实验三：LoRA + 数据增强
+# 数据增强函数（EDA）
 try:
     from nltk.corpus import wordnet as wn
     from nltk import word_tokenize, pos_tag
@@ -463,7 +452,7 @@ def eda_augment(text, alpha_sr=0.1, alpha_ri=0.1, alpha_rs=0.1, alpha_rd=0.1, nu
         alpha_rs: 随机交换比例
         alpha_rd: 随机删除比例
         num_aug: 生成多少个增强样本（这里简化为1个）
-        use_synonym: 是否使用同义词替换（False 可大幅提升速度）
+        use_synonym: 是否使用同义词替换
     
     Returns:
         增强后的文本
@@ -501,7 +490,7 @@ def augment_dataset_batch(examples, num_aug=2, use_synonym=True):
     Args:
         examples: 包含'text'和'label'的字典
         num_aug: 每个样本生成多少个增强版本
-        use_synonym: 是否使用同义词替换（False 可大幅提升速度）
+        use_synonym: 是否使用同义词替换
     
     Returns:
         增强后的样本（包含原始样本+增强样本）
@@ -529,7 +518,6 @@ def augment_dataset_batch(examples, num_aug=2, use_synonym=True):
 print("--- 2. 全局配置和辅助函数定义完毕 ---\n")
 
 # --- 3. 加载分词器 (Tokenizer) ---
-# 无论哪个实验，分词器都是一样的
 print("--- 3. 加载分词器 ---")
 # 确保使用和模型匹配的分词器
 try:
@@ -549,9 +537,8 @@ except Exception as e:
 data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 print()
 
-# --- 4. 准备数据集 (用于实验一和实验二) ---
-# 这是一个“初学者”版本的预处理，没有做额外的数据清洗
-print("--- 4. 准备数据集 (实验一和实验二：基础预处理) ---")
+# --- 4. 准备数据集 ---
+print("--- 4. 准备数据集 ---")
 
 
 def tokenize_function(examples):
@@ -609,7 +596,7 @@ train_dataset = raw_datasets["train"].shuffle(seed=42).select(range(TRAIN_SAMPLE
 eval_dataset = raw_datasets["test"].shuffle(seed=42).select(range(EVAL_SAMPLES))
 
 print(f"原始数据集加载成功: {raw_datasets}")
-print(f"用于实验的样本量: 训练集 {len(train_dataset)}, 测试集 {len(eval_dataset)}")
+print(f"训练集 {len(train_dataset)}, 测试集 {len(eval_dataset)}")
 
 # 使用 .map() 方法批量处理数据集
 # batched=True 可以让分词器一次处理一批数据，速度更快
@@ -620,14 +607,10 @@ eval_dataset_basic = tokenized_datasets_basic["test"].shuffle(seed=42).select(ra
 
 print("基础预处理（仅分词）完成。\n")
 
-# --- 5. 实验一 (Baseline): 全量参数微调 ---
+# --- 5. Baseline: 全量参数微调 ---
 print("==============================================")
-print("--- 5. 开始实验一 (Baseline): 全量参数微调 ---")
+print("--- 5. Baseline: 全量参数微调 ---")
 print("==============================================")
-
-# 加载预训练模型
-# 思考：这里我们加载的是 DistilBertForSequenceClassification
-# num_labels=2 告诉模型这是一个二分类问题 (IMDb: 积极/消极)
 try:
     model_baseline = AutoModelForSequenceClassification.from_pretrained(
         MODEL_CHECKPOINT,
@@ -643,12 +626,10 @@ except Exception as e:
         print(f"或者参考 OFFLINE_SETUP.md 手动下载")
     raise
 
-# 打印一下模型参数，看看全量微调要动多少参数
 print("模型 (Baseline) 可训练参数:")
 print_trainable_parameters(model_baseline)
 
 # 定义训练参数
-# 思考：output_dir 是存放模型和日志的地方，每个实验用不同的目录
 training_args_baseline = TrainingArguments(
     output_dir="./results/baseline",
     num_train_epochs=NUM_EPOCHS,
@@ -694,10 +675,10 @@ print("评估结果 (Baseline):", eval_results_baseline)
 
 # 生成可视化
 print("\n--- 生成可视化 (Baseline) ---")
-plot_training_curves(trainer_baseline, "实验一_Baseline")
+plot_training_curves(trainer_baseline, "Baseline")
 plot_confusion_matrix(model_baseline, tokenizer, eval_dataset_basic, 
                      torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-                     "实验一_Baseline")
+                     "Baseline")
 
 # 保存模型和分词器用于前端
 print("\n--- 保存模型 (Baseline) 用于前端 ---")
@@ -706,15 +687,12 @@ model_baseline.save_pretrained(model_save_path_baseline)
 tokenizer.save_pretrained(model_save_path_baseline)
 print(f"模型已保存到: {model_save_path_baseline}")
 
-print("--- 实验一 (Baseline) 结束 ---\n")
+print("--- Baseline 结束 ---\n")
 
-# --- 6. 实验二 (核心要求): LoRA 高效微调 ---
+# --- 6. LoRA 高效微调 ---
 print("==============================================")
-print("--- 6. 开始实验二 (核心要求): LoRA 高效微调 ---")
+print("--- 6. LoRA 高效微调 ---")
 print("==============================================")
-
-# 思考：实验要求使用 LoRA。我需要先加载一个 *新* 的、*未训练* 的模型。
-# 不能使用上一个实验训练过的 `model_baseline`。
 try:
     model_lora = AutoModelForSequenceClassification.from_pretrained(
         MODEL_CHECKPOINT,
@@ -729,31 +707,18 @@ except Exception as e:
         print(f"  python download_model.py")
     raise
 
-# 思考：接下来是 LoRA 的核心配置。
-# 我需要定义 LoraConfig。
-# 优化配置：增加 r 值以获得更好的效果
-# 1. `r`: LoRA 的秩。从 8 增加到 16，增加参数量以提升效果。
-# 2. `lora_alpha`: LoRA 的缩放因子，通常是 `r` 的两倍（16 -> 32）。
-# 3. `target_modules`: 要在哪些层应用 LoRA。
-#    - DistilBERT 的 Transformer 块里有 'q_lin' (query) 和 'v_lin' (value)。
-#    - 可以扩展到更多层：'k_lin' (key) 和 'out_lin' (output)
-# 4. `task_type`: 必须指定，我们这是序列分类。
-# 优化LoRA配置以尝试超越baseline
-# 策略：增加r值到32，增加参数量以提升表达能力
 lora_config = LoraConfig(
-    r=32,  # 从16增加到32，大幅增加参数量以提升效果（尝试超越baseline）
-    lora_alpha=64,  # 相应增加到64（r的两倍，保持比例）
-    target_modules=["q_lin", "v_lin", "k_lin", "out_lin"],  # 扩展到更多层：Query, Value, Key, Output
-    lora_dropout=0.05,  # 降低dropout以提升模型容量
-    bias="none",  # "none" 是一个常见的设置
-    task_type=TaskType.SEQ_CLS,  # 任务类型：序列分类
+    r=32,
+    lora_alpha=64,
+    target_modules=["q_lin", "v_lin", "k_lin", "out_lin"],
+    lora_dropout=0.05,
+    bias="none",
+    task_type=TaskType.SEQ_CLS,
 )
 
 # 使用 `get_peft_model` 来包装我们的基础模型
 model_lora_peft = get_peft_model(model_lora, lora_config)
 
-# 关键一步：打印 LoRA 模型的参数！
-# 这将是实验报告的亮点，对比实验一的参数量。
 print("模型 (LoRA) 可训练参数:")
 print_trainable_parameters(model_lora_peft)
 
@@ -763,7 +728,7 @@ training_args_lora = TrainingArguments(
     num_train_epochs=NUM_EPOCHS,
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
-    learning_rate=LEARNING_RATE_LORA,  # LoRA 使用优化的学习率（3e-5）
+    learning_rate=LEARNING_RATE_LORA,
     weight_decay=0.01,
     eval_strategy="epoch",  # 使用新参数名
     save_strategy="epoch",
@@ -803,10 +768,10 @@ print("评估结果 (LoRA):", eval_results_lora)
 
 # 生成可视化
 print("\n--- 生成可视化 (LoRA) ---")
-plot_training_curves(trainer_lora, "实验二_LoRA")
+plot_training_curves(trainer_lora, "LoRA")
 plot_confusion_matrix(trainer_lora.model, tokenizer, eval_dataset_basic,
                      torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-                     "实验二_LoRA")
+                     "LoRA")
 
 # 保存模型和分词器用于前端
 print("\n--- 保存模型 (LoRA) 用于前端 ---")
@@ -816,52 +781,23 @@ trainer_lora.model.save_pretrained(model_save_path_lora)
 tokenizer.save_pretrained(model_save_path_lora)
 print(f"模型已保存到: {model_save_path_lora}")
 
-print("--- 实验二 (LoRA) 结束 ---\n")
+print("--- LoRA 结束 ---\n")
 
-# --- 7. 实验三 (改进工作): LoRA + 领域适应性预训练 (DAPT) ---
-# 思考：这是最适合作为"改进点"的方向，逻辑通顺且效果立竿见影。
-# 
-# 原理：DistilBERT 是在 Wikipedia（维基百科）上预训练的，那是"百科全书式的英语"。
-#      IMDb 是电影评论，充满了口语、俚语、激烈的情绪词，这是"影评式的英语"。
-#      模型还没学会"读影评"，就逼它"做分类"，效果肯定打折。
-# 
-# 方法：领域适应性预训练 (Domain-Adaptive Pre-training, DAPT)
-#      第一阶段 (DAPT)：在 IMDb 的所有文本上继续做 MLM (Masked Language Modeling) 预训练
-#      第二阶段 (Fine-tuning)：在 DAPT 后的模型上接分类层，做 LoRA 微调
-# 
-# 为什么新颖：这叫"继续预训练"(Continued Pre-training)，在学术界是公认有效的提升手段
-#            (ACL 2020 论文 "Don't Stop Pretraining")
-# 
-# 预期提升：通常能稳定提升 0.5% - 1.5%，比数据增强更有效且更合理
-# 
-#    关于数据增强的说明：
-#     数据增强（EDA）虽然也能提升效果，但存在以下问题：
-#     1. 耗时大：同义词替换需要 NLTK 词性标注和 WordNet 查询，对 10000 条样本
-#        做 2 倍增强（共 30000 条）可能需要数小时
-#     2. 提升少：预训练模型（DistilBERT）已经很强，数据增强的边际收益通常只有 0.5-1%，
-#        不如 DAPT 这种领域适应方法明显
-#     3. 风险高：同义词替换可能改变情感强度（如"good"和"great"虽然同义但强度不同），
-#        在情感分析任务中可能引入噪音
+# --- 7. LoRA + DAPT (领域适应性预训练) ---
 print("==============================================")
-print("--- 7. 开始实验三 (改进): LoRA + DAPT (领域适应性预训练) ---")
+print("--- 7. LoRA + DAPT (领域适应性预训练) ---")
 print("==============================================")
 
 # ========== 阶段1: DAPT (领域适应性预训练) ==========
-# 在 IMDb 数据上继续做 MLM 预训练，让模型适应影评领域的语言风格
 print("\n--- 阶段1: DAPT (领域适应性预训练) ---")
-print("目标：让 DistilBERT 适应 IMDb 影评领域的语言风格（口语、俚语、情绪词）")
 
 # 1. 准备 MLM 预训练数据
-# 使用所有可用的 IMDb 文本（train + test），不需要标签
 print("\n准备 MLM 预训练数据...")
-# 合并训练集和测试集的文本（用于无监督预训练）
 dapt_texts_train = raw_datasets["train"]["text"]
 dapt_texts_test = raw_datasets["test"]["text"]
 all_dapt_texts = dapt_texts_train + dapt_texts_test
 print(f"   总文本数: {len(all_dapt_texts)}")
-print(f"   使用前 {min(20000, len(all_dapt_texts))} 条文本进行 DAPT（可调整）")
-
-# 限制 DAPT 数据量以节省时间（可根据需要调整）
+print(f"   使用前 {min(20000, len(all_dapt_texts))} 条文本进行 DAPT")
 DAPT_SAMPLES = min(20000, len(all_dapt_texts))
 dapt_texts = all_dapt_texts[:DAPT_SAMPLES]
 
@@ -882,8 +818,7 @@ dapt_dataset_tokenized = dapt_dataset.map(
 )
 
 # 3. 创建 MLM 数据整理器
-# MLM 需要随机 mask 一些 token，DataCollatorForLanguageModeling 会自动处理
-mlm_probability = 0.15  # 15% 的 token 会被 mask（BERT 标准）
+mlm_probability = 0.15
 data_collator_mlm = DataCollatorForLanguageModeling(
     tokenizer=tokenizer,
     mlm=True,  # 启用 MLM
@@ -906,16 +841,15 @@ except Exception as e:
     raise
 
 print("模型 (DAPT MLM) 可训练参数:")
-print_trainable_parameters(model_dapt_mlm)  # 全量参数可训练
+print_trainable_parameters(model_dapt_mlm)
 
 # 5. 配置 DAPT 训练参数
-# DAPT 通常只需要 1-3 个 epoch，学习率可以稍大
-DAPT_EPOCHS = 2  # DAPT 预训练轮次（通常 1-3 轮即可）
+DAPT_EPOCHS = 2
 training_args_dapt = TrainingArguments(
     output_dir="./results/dapt_mlm",
     num_train_epochs=DAPT_EPOCHS,
     per_device_train_batch_size=BATCH_SIZE,
-    learning_rate=LEARNING_RATE_DAPT_MLM,  # DAPT 使用稍大的学习率
+    learning_rate=LEARNING_RATE_DAPT_MLM,
     weight_decay=0.01,
     save_strategy="epoch",
     save_total_limit=1,  # 只保留最后一个 checkpoint
@@ -939,7 +873,6 @@ trainer_dapt = Trainer(
 
 # 7. 开始 DAPT 预训练
 print(f"\n--- 开始 DAPT 预训练 ({DAPT_EPOCHS} 个 epoch) ---")
-print("提示：这可能需要一些时间，但比数据增强快得多...")
 trainer_dapt.train()
 print("--- DAPT 预训练完成 ---")
 
@@ -952,7 +885,6 @@ print("DAPT 模型保存完成")
 
 # ========== 阶段2: 在 DAPT 后的模型上做 LoRA 微调 ==========
 print("\n--- 阶段2: 在 DAPT 后的模型上做 LoRA 微调 ---")
-print("目标：在领域适应的模型基础上，使用 LoRA 进行高效微调")
 
 # 1. 准备分类任务数据（使用基础数据集，不需要数据增强）
 print("\n准备分类任务数据...")
@@ -997,11 +929,11 @@ except Exception as e:
     model_lora_advanced.distilbert.load_state_dict(dapt_state_dict)
     print("已手动复制 DAPT 权重到分类模型")
 
-# 3. 应用 LoRA（使用和实验二完全相同的配置）
+# 3. 应用 LoRA
 model_lora_advanced_peft = get_peft_model(model_lora_advanced, lora_config)
 
 print("模型 (LoRA + DAPT) 可训练参数:")
-print_trainable_parameters(model_lora_advanced_peft)  # 参数量应该和实验二一样
+print_trainable_parameters(model_lora_advanced_peft)
 
 # 4. 准备训练参数
 training_args_lora_advanced = TrainingArguments(
@@ -1009,7 +941,7 @@ training_args_lora_advanced = TrainingArguments(
     num_train_epochs=NUM_EPOCHS,
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
-    learning_rate=LEARNING_RATE_DAPT_FINETUNE,  # DAPT 后的微调使用标准学习率
+    learning_rate=LEARNING_RATE_DAPT_FINETUNE,
     weight_decay=0.01,
     eval_strategy="epoch",
     save_strategy="epoch",
@@ -1048,10 +980,10 @@ print("评估结果 (LoRA + DAPT):", eval_results_lora_advanced)
 
 # 生成可视化
 print("\n--- 生成可视化 (LoRA + DAPT) ---")
-plot_training_curves(trainer_lora_advanced, "实验三_LoRA_DAPT")
+plot_training_curves(trainer_lora_advanced, "LoRA_DAPT")
 plot_confusion_matrix(trainer_lora_advanced.model, tokenizer, eval_dataset_advanced,
                      torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-                     "实验三_LoRA_DAPT")
+                     "LoRA_DAPT")
 
 # 保存模型和分词器用于前端
 print("\n--- 保存模型 (LoRA + DAPT) 用于前端 ---")
@@ -1060,36 +992,16 @@ trainer_lora_advanced.model.save_pretrained(model_save_path_lora_advanced)
 tokenizer.save_pretrained(model_save_path_lora_advanced)
 print(f"模型已保存到: {model_save_path_lora_advanced}")
 
-print("--- 实验三 (改进) 结束 ---\n")
+print("--- LoRA + DAPT 结束 ---\n")
 
-# --- 8. 实验四：LoRA + DAPT + R-Drop ---
-# 
-# 💡 实验设计说明：
-# 1. R-Drop vs DAPT：R-Drop 是算法层面的改进（损失函数正则化），通常能带来额外提升
-#    （预期提升 1-2%），且不增加训练数据量，训练时间与实验二相近。
-# 2. 为什么 LoRA 训练时间优势不明显？
-#    - DistilBERT 只有 66M 参数，全量微调也不慢（26分钟）
-#    - LoRA 的优势在更大模型（如 BERT-base 110M+、GPT 等）上更明显
-#    - 当前规模下，LoRA 的主要优势是参数量少（1.73%），而非训练速度
-# 3. 性能回缩问题：
-#    - Baseline 0.93 → 0.91：可能是学习率/epoch 数调整导致
-#    - LoRA 0.91：在参数量减少 98% 的情况下，性能损失仅 2%，这是可接受的
-#    - 建议：如果追求更高性能，可以增加训练轮次或调整学习率
+# --- 8. LoRA + DAPT + R-Drop ---
 print("==============================================")
-print("--- 8. 开始实验四 (LoRA + DAPT + R-Drop) ---")
+print("--- 8. LoRA + DAPT + R-Drop ---")
 print("==============================================")
-print("💡 提示：R-Drop 是算法层面的改进，预期效果明显（1-2%），")
-print("   且训练时间与实验二相近（不增加数据量），推荐优先使用此方法。")
-# 实验四 = 与实验三保持同样的 DAPT 模型与 LoRA 配置，唯一新增变量是 R-Drop 损失。
-# 目标：观察在 DAPT 基础上，R-Drop 是否带来额外的泛化提升。
-
-# 1. 数据集：沿用实验三的数据集，以保证可比性
-
-# 2. 从 DAPT 后的模型加载，创建分类模型（与实验三相同）
-print("\n从 DAPT 后的模型创建分类模型（用于 R-Drop）...")
+print("\n从 DAPT 后的模型创建分类模型...")
 try:
     model_lora_rdrop = AutoModelForSequenceClassification.from_pretrained(
-        dapt_model_path,  # 从 DAPT 模型加载（与实验三相同）
+        dapt_model_path,
         num_labels=2,
         local_files_only=False
     )
@@ -1123,7 +1035,7 @@ training_args_lora_rdrop = TrainingArguments(
     num_train_epochs=NUM_EPOCHS,
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
-    learning_rate=LEARNING_RATE_DAPT_FINETUNE,  # 保持与实验三一致，突出 R-Drop 变量
+    learning_rate=LEARNING_RATE_DAPT_FINETUNE,
     weight_decay=0.01,
     eval_strategy="epoch",
     save_strategy="epoch",
@@ -1164,13 +1076,13 @@ print("评估结果 (LoRA + DAPT + R-Drop):", eval_results_lora_rdrop)
 
 # 7. 可视化
 print("\n--- 生成可视化 (LoRA + DAPT + R-Drop) ---")
-plot_training_curves(trainer_lora_rdrop, "实验四_LoRA_DAPT_RDrop")
+plot_training_curves(trainer_lora_rdrop, "LoRA_DAPT_RDrop")
 plot_confusion_matrix(
     trainer_lora_rdrop.model,
     tokenizer,
     eval_dataset_advanced,
     torch.device("cuda" if torch.cuda.is_available() else "cpu"),
-    "实验四_LoRA_DAPT_RDrop",
+    "LoRA_DAPT_RDrop",
 )
 
 # 8. 保存模型
@@ -1180,23 +1092,22 @@ trainer_lora_rdrop.model.save_pretrained(model_save_path_lora_rdrop)
 tokenizer.save_pretrained(model_save_path_lora_rdrop)
 print(f"模型已保存到: {model_save_path_lora_rdrop}")
 
-print("--- 实验四 (LoRA + DAPT + R-Drop) 结束 ---\n")
+print("--- LoRA + DAPT + R-Drop 结束 ---\n")
 
-# --- 9. 结果汇总与对比 (系统性对比) ---
+# --- 9. 结果汇总与对比 ---
 print("==============================================")
-print("--- 9. 实验结果汇总 (系统性对比) ---")
+print("--- 9. 结果汇总 ---")
 print("==============================================")
-print("这项工作是实验报告的核心：分析结果")
-print("\n--- 实验一 (Baseline) 评估结果 ---")
+print("\n--- Baseline 评估结果 ---")
 print(eval_results_baseline)
 
-print("\n--- 实验二 (LoRA) 评估结果 ---")
+print("\n--- LoRA 评估结果 ---")
 print(eval_results_lora)
 
-print("\n--- 实验三 (LoRA + DAPT) 评估结果 ---")
+print("\n--- LoRA + DAPT 评估结果 ---")
 print(eval_results_lora_advanced)
 
-print("\n--- 实验四 (LoRA + DAPT + R-Drop) 评估结果 ---")
+print("\n--- LoRA + DAPT + R-Drop 评估结果 ---")
 print(eval_results_lora_rdrop)
 
 print("\n--- 初步分析 ---")
@@ -1205,90 +1116,63 @@ lora_f1 = eval_results_lora.get('eval_f1', 0)
 lora_advanced_f1 = eval_results_lora_advanced.get('eval_f1', 0)
 lora_rdrop_f1 = eval_results_lora_rdrop.get('eval_f1', 0)
 
-print(f"实验一 (Baseline) F1: {baseline_f1:.4f} | Accuracy: {eval_results_baseline.get('eval_accuracy', 0):.4f}")
-print(f"实验二 (LoRA) F1: {lora_f1:.4f} | Accuracy: {eval_results_lora.get('eval_accuracy', 0):.4f}")
-print(f"实验三 (LoRA + DAPT) F1: {lora_advanced_f1:.4f} | Accuracy: {eval_results_lora_advanced.get('eval_accuracy', 0):.4f}")
-print(f"实验四 (LoRA + DAPT + R-Drop) F1: {lora_rdrop_f1:.4f} | Accuracy: {eval_results_lora_rdrop.get('eval_accuracy', 0):.4f}")
+print(f"Baseline F1: {baseline_f1:.4f} | Accuracy: {eval_results_baseline.get('eval_accuracy', 0):.4f}")
+print(f"LoRA F1: {lora_f1:.4f} | Accuracy: {eval_results_lora.get('eval_accuracy', 0):.4f}")
+print(f"LoRA + DAPT F1: {lora_advanced_f1:.4f} | Accuracy: {eval_results_lora_advanced.get('eval_accuracy', 0):.4f}")
+print(f"LoRA + DAPT + R-Drop F1: {lora_rdrop_f1:.4f} | Accuracy: {eval_results_lora_rdrop.get('eval_accuracy', 0):.4f}")
 
 # 生成实验对比图
 print("\n--- 生成实验对比图 ---")
 results_dict = {
-    "实验一_Baseline": eval_results_baseline,
-    "实验二_LoRA": eval_results_lora,
-    "实验三_LoRA_DAPT": eval_results_lora_advanced,
-    "实验四_LoRA_DAPT_RDrop": eval_results_lora_rdrop,
+    "Baseline": eval_results_baseline,
+    "LoRA": eval_results_lora,
+    "LoRA_DAPT": eval_results_lora_advanced,
+    "LoRA_DAPT_RDrop": eval_results_lora_rdrop,
 }
 plot_comparison(results_dict)
 
 print("\n--- 结果分析 ---")
 print(f"训练配置：{NUM_EPOCHS} 个 epoch，训练样本 {TRAIN_SAMPLES} 条，测试样本 {EVAL_SAMPLES} 条")
-print("\n1. 对比实验一和实验二：")
+print("\n1. 对比 Baseline 和 LoRA：")
 performance_diff = baseline_f1 - lora_f1
 if lora_f1 < 0.5:
-    print(f"   警告: LoRA 模型效果较差 (F1={lora_f1:.4f})，可能原因：")
-    print(f"      - 训练轮次不足或配置需要调整")
+    print(f"   警告: LoRA 模型效果较差 (F1={lora_f1:.4f})")
 else:
     print(f"   LoRA 用极少的参数达到了接近 Baseline 的性能！")
     print(f"      - Baseline: F1={baseline_f1:.4f}, 参数量=66.96M (100%)")
     print(f"      - LoRA: F1={lora_f1:.4f}, 参数量≈1.18M (1.73%)")
     print(f"      - 参数量减少: 66.96M -> 1.18M (减少 98.2%)")
     print(f"      - 性能损失: {performance_diff:.4f} (仅 {performance_diff/baseline_f1*100:.2f}%)")
-    print(f"      - 结论：LoRA 高效微调非常成功！用不到 2% 的参数达到了 98.8% 的性能")
+    print(f"      - LoRA 高效微调：用不到 2% 的参数达到接近 Baseline 的性能")
 
-print("\n2. 对比实验二和实验三（DAPT）：")
+print("\n2. 对比 LoRA 和 LoRA + DAPT：")
 dapt_diff = lora_advanced_f1 - lora_f1
 if abs(dapt_diff) < 0.01:
     print(f"   DAPT 效果不明显 (F1差异: {abs(dapt_diff):.4f})")
-    print(f"      - 可能原因：DAPT 预训练轮次不足或数据量不够")
-    print(f"      - 建议：增加 DAPT_EPOCHS 或 DAPT_SAMPLES 以获得更好的效果")
 else:
     if dapt_diff > 0:
-        print(f"   DAPT 带来了 {dapt_diff:.4f} 的提升！")
-        print(f"      - DAPT 让模型适应了 IMDb 影评领域的语言风格")
-        print(f"      - 预期提升：0.5-1.5%，这是领域适应性预训练的典型效果")
-        print(f"      - 注意：提升幅度取决于 DAPT 的预训练轮次和数据量")
+        print(f"   DAPT 带来了 {dapt_diff:.4f} 的提升")
     else:
         print(f"   DAPT 略微降低了性能 ({abs(dapt_diff):.4f})")
-        print(f"      - 可能原因：DAPT 预训练轮次不足或学习率不当")
-        print(f"      - 建议：增加 DAPT_EPOCHS 或调整 LEARNING_RATE_DAPT_MLM")
 
-print("\n3. 对比实验三和实验四（R-Drop 的额外效果）：")
+print("\n3. 对比 LoRA + DAPT 和 LoRA + DAPT + R-Drop：")
 rdrop_diff = lora_rdrop_f1 - lora_advanced_f1
 if rdrop_diff > 0.005:
-    print(f"   R-Drop 在 DAPT 基础上带来了额外 {rdrop_diff:.4f} 的提升！")
-    print(f"      - R-Drop 是算法层面的改进，通过一致性正则化提升泛化能力")
-    print(f"      - 不增加训练数据量，训练时间与实验二相近")
-    print(f"      - 推荐：在实际应用中，DAPT + R-Drop 的组合效果最佳")
+    print(f"   R-Drop 在 DAPT 基础上带来了额外 {rdrop_diff:.4f} 的提升")
 elif rdrop_diff < -0.005:
     print(f"   数据增强效果更优（差异: {abs(rdrop_diff):.4f}）")
-    print(f"      - 这可能是因为数据增强增加了训练样本的多样性")
 else:
     print(f"   两种方法效果相近（差异: {abs(rdrop_diff):.4f}）")
-    print(f"      - 建议：优先使用 R-Drop（训练时间更短，不增加数据量）")
 
-print("\n--- 实验结论 ---")
-print("实验成功完成！主要发现：")
-print(f"   1. LoRA 高效微调非常有效：仅用 1.73% 的参数达到约 {lora_f1/baseline_f1*100:.1f}% 的性能")
-print(f"   2. Baseline 全量微调效果最好：F1={baseline_f1:.4f}")
-print(f"   3. LoRA 基础版本效果优秀：F1={lora_f1:.4f}，性能损失仅 {performance_diff:.4f}")
-print(f"   4. R-Drop 是算法层面的改进，预期效果比数据增强更明显（1-2% vs 0.5-1%）")
-print(f"\n--- 训练效率对比 ---")
-print(f"   - Baseline: 训练时间约 26 分钟，效果最好（F1={baseline_f1:.4f}）")
-print(f"   - LoRA: 训练时间约 23 分钟，参数量少 98%，效果接近（F1={lora_f1:.4f}）")
-print(f"   - 注意：当前模型规模（66M）下，LoRA 的时间优势不明显")
-print(f"     LoRA 的优势主要体现在：")
-print(f"     * 参数量大幅减少（1.73% vs 100%）")
-print(f"     * 在更大模型（110M+）上训练速度优势更明显")
-print(f"     * 内存占用更少，适合资源受限场景")
-print(f"\n--- 改进方法推荐 ---")
-print(f"   1. 如果追求效果：优先使用 R-Drop（实验四），预期提升 1-2%")
-print(f"   2. 如果追求速度：使用快速数据增强（禁用同义词替换），耗时从数小时降至数分钟")
-print(f"   3. 如果追求平衡：使用 LoRA + R-Drop，效果和效率兼顾")
+print("\n--- 结论 ---")
+print("主要发现：")
+print(f"   1. LoRA 高效微调：仅用 1.73% 的参数达到约 {lora_f1/baseline_f1*100:.1f}% 的性能")
+print(f"   2. Baseline 全量微调：F1={baseline_f1:.4f}")
+print(f"   3. LoRA：F1={lora_f1:.4f}，性能损失 {performance_diff:.4f}")
 
 print("==============================================")
 
-# --- 9. 模型可解释性探究 (SHAP) ---
-# 实验要求：使用 SHAP/LIME 等工具，探究模型决策依据
+# --- 9. 模型可解释性分析 (SHAP) ---
 print("\n==============================================")
 print("--- 9. 模型可解释性分析 (SHAP) ---")
 print("==============================================")
@@ -1310,5 +1194,5 @@ print(f"      - LoRA: ./saved_models/lora_basic")
 print(f"      - LoRA + 数据增强: ./saved_models/lora_advanced")
 
 print("\n==============================================")
-print("--- 实验三 (NLP) 脚本执行完毕 ---")
+print("--- 脚本执行完毕 ---")
 print("==============================================")

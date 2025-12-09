@@ -1,6 +1,3 @@
-# Gradio 前端应用 - 用于展示训练好的文本分类模型
-# 这个文件提供了一个友好的 Web 界面，用于测试和展示训练好的模型
-
 import torch
 import gradio as gr
 import numpy as np
@@ -55,8 +52,6 @@ plt.rcParams['axes.unicode_minus'] = False
 warnings.filterwarnings('ignore', category=UserWarning, module='matplotlib')
 
 # --- 全局配置 ---
-# 优先使用本地模型，如果不存在则使用在线模型
-# 与 distilBERT.py 保持一致的检查逻辑
 MODEL_NAME = "distilbert-base-uncased"
 LOCAL_MODEL_PATH = "./models/distilbert-base-uncased"
 
@@ -114,7 +109,7 @@ MODEL_SUMMARY = {
         "bullets": [
             "冻结大部分参数，仅训练 LoRA Adapter",
             "显著降低训练/推理成本",
-            "通过增大 r / α 并优化学习率获得更好表现"
+            "通过增大 r / α 和学习率优化获得更好表现"
         ]
     },
     "实验三: LoRA + 数据增强 (当前最佳)": {
@@ -171,9 +166,7 @@ CUSTOM_CSS = """
 # --- 辅助函数 ---
 
 def clean_html(text):
-    """
-    清洗 HTML 标签（用于实验三的模型）
-    """
+    """清洗 HTML 标签"""
     return re.sub(r'<.*?>', ' ', text)
 
 
@@ -225,7 +218,7 @@ def load_model(model_path):
         # 如果是模型名，使用 local_files_only=False（允许在线下载）
         use_local_only = (MODEL_CHECKPOINT != MODEL_NAME)
         
-        # 抑制模型权重未初始化的警告（这是正常的，因为基础模型没有分类头）
+        # 抑制模型权重未初始化的警告
         with warnings.catch_warnings():
             warnings.filterwarnings('ignore', message='.*Some weights.*were not initialized.*')
             warnings.filterwarnings('ignore', message='.*You should probably TRAIN.*')
@@ -407,7 +400,6 @@ def predict_text(text, use_advanced_preprocessing=True):
         if use_advanced_preprocessing and (
             "数据增强" in current_model_name or "数据清洗" in current_model_name
         ):
-            # 如果使用的是实验三的模型，使用数据清洗
             processed_text = clean_html(text)
         else:
             processed_text = text
@@ -506,6 +498,14 @@ def generate_explanation(text, predicted_class, confidence, probs):
 def compute_token_contributions(text):
     """
     调用 SHAP 解释器输出逐词贡献
+    
+    注意：SHAP 值反映的是"词对预测结果的边际贡献"，而非"词语本身的情感语义"。
+    中性词（如 "the", "is", "one"）也可能呈现正向 SHAP 值，原因包括：
+    1) SHAP 衡量相对贡献：移除中性词可能降低模型对整体语义的理解，从而降低预测信心
+    2) 语境模式：模型学习到某些句法结构（如 "one of the best"）与积极情感相关
+    3) 贡献分摊：SHAP 会将整体正向信号分配给所有词，包括结构性的中性词
+    4) 组合效应：在序列模型中，中性词帮助构建完整语义，使情感词正确发挥作用
+    因此，中性词的正向 SHAP 值表示它"支持了当前预测趋势"，而非其本身具有积极情感。
     """
     if current_shap_explainer is None or current_tokenizer is None:
         return []
@@ -829,6 +829,9 @@ def create_shap_bar_plot(contributions, top_n=20, base_value=0.5):
     
     Returns:
         matplotlib figure 对象
+    
+    注意：SHAP 值反映的是"词对预测结果的边际贡献"，而非"词语本身的情感语义"。
+    中性词也可能呈现正向 SHAP 值，因为它们帮助构建语义结构或支持整体预测趋势。
     """
     if not contributions:
         return None
@@ -863,13 +866,13 @@ def create_shap_bar_plot(contributions, top_n=20, base_value=0.5):
         # 绘制箭头式位移（从base_value到最终值）
         y_pos = np.arange(len(tokens))
         
-        # 绘制每个词的贡献条形图（从0开始，而不是从base_value开始）
+        # 绘制每个词的贡献条形图
         colors = ['#ff4444' if v > 0 else '#4444ff' for v in values]
         ax.barh(y_pos, values, left=0, color=colors, alpha=0.7, label='词汇贡献')
         
         # 添加箭头显示累积效果
         if len(cumulative_values) > 0:
-            # 在右侧添加箭头，显示从base_value到最终值的累积效果
+            # 在右侧添加箭头，显示累积效果
             arrow_y = len(tokens) - 0.5
             arrow_start = base_value
             arrow_end = final_value
